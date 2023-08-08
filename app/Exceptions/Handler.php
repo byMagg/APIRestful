@@ -9,10 +9,12 @@ use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Illuminate\Session\TokenMismatchException;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Throwable;
 
 class Handler extends ExceptionHandler
 {
@@ -33,56 +35,83 @@ class Handler extends ExceptionHandler
      */
     public function register(): void
     {
-        $this->reportable(function (ValidationException $e, $request) {
+        $this->reportable(function (Throwable $e, $request) {
             return $this->convertExceptionToResponse($e, $request);
         });
+    }
 
-        $this->renderable(function (ModelNotFoundException $e, $request) {
-            return $this->errorResponse("No se encontró la id en el modelo especificada", 404);
-        });
+    public function handleException($request, Exception $exception)
+    {
+        if ($exception instanceof ValidationException) {
+            return $this->convertValidationExceptionToResponse($exception, $request);
+        }
 
-        $this->renderable(function (AuthenticationException $e, $request) {
-            return $this->unauthenticated($request, $e);
-        });
+        if ($exception instanceof ModelNotFoundException) {
+            $modelo = strtolower(class_basename($exception->getModel()));
+            return $this->errorResponse("No existe ninguna instancia de {$modelo} con el id especificado", 404);
+        }
 
-        $this->renderable(function (AuthorizationException $e) {
-            return $this->errorResponse("No posee permisos para ejecutar esta acción", 403);
-        });
+        if ($exception instanceof AuthenticationException) {
+            return $this->unauthenticated($request, $exception);
+        }
 
-        $this->renderable(function (NotFoundHttpException $e, $request) {
-            $previous_e = $e->getPrevious();
-            if ($previous_e instanceof ModelNotFoundException) {
-                return $this->errorResponse("No existe ninguna instancia de {$previous_e->getModel()} con el id especificado", 404);
-            }
-            return $this->errorResponse("No se encontró la URL especificada", 404);
-        });
+        if ($exception instanceof AuthorizationException) {
+            return $this->errorResponse('No posee permisos para ejecutar esta acción', 403);
+        }
 
-        $this->renderable(function (MethodNotAllowedHttpException $e, $request) {
-            return $this->errorResponse("El método especificado no es válido", 405);
-        });
+        if ($exception instanceof NotFoundHttpException) {
+            return $this->errorResponse('No se encontró la URL especificada', 404);
+        }
 
-        $this->renderable(function (HttpException $e, $request) {
-            return $this->errorResponse($e->getMessage(), $e->getStatusCOde());
-        });
+        if ($exception instanceof MethodNotAllowedHttpException) {
+            return $this->errorResponse('El método especificado en la petición no es válido', 405);
+        }
 
-        $this->renderable(function (QueryException $e, $request) {
-            $codigo = $e->errorInfo[1];
+        if ($exception instanceof HttpException) {
+            return $this->errorResponse($exception->getMessage(), $exception->getStatusCode());
+        }
+
+        if ($exception instanceof QueryException) {
+            $codigo = $exception->errorInfo[1];
 
             if ($codigo == 1451) {
-                return $this->errorResponse("No se puede eliminar de forma permanente el recurso porque está relacionado con algún otro.", 409);
+                return $this->errorResponse('No se puede eliminar de forma permamente el recurso porque está relacionado con algún otro.', 409);
             }
-        });
+        }
 
-        $this->renderable(function (Exception $e) {
-            return $this->errorResponse("Falla inesperada. Intente luego.${e}", 500);
-        });
+        if ($exception instanceof TokenMismatchException) {
+            return redirect()->back()->withInput($request->input());
+        }
+
+        if (config('app.debug')) {
+            return parent::render($request, $exception);
+        }
+
+        return $this->errorResponse('Falla inesperada. Intente luego', 500);
     }
 
+    /**
+     * Convert an authentication exception into an unauthenticated response.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  \Illuminate\Auth\AuthenticationException  $exception
+     * @return \Illuminate\Http\Response
+     */
     protected function unauthenticated($request, AuthenticationException $exception)
     {
-        return $this->errorResponse("No autenticado", 401);
+        if ($this->isFrontend($request)) {
+            return redirect()->guest('login');
+        }
+        return $this->errorResponse('No autenticado.', 401);
     }
 
+    /**
+     * Create a response object from the given validation exception.
+     *
+     * @param  \Illuminate\Validation\ValidationException  $e
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Symfony\Component\HttpFoundation\Response
+     */
     protected function convertValidationExceptionToResponse(ValidationException $e, $request)
     {
         $errors = $e->validator->errors()->getMessages();
@@ -95,5 +124,10 @@ class Handler extends ExceptionHandler
         }
 
         return $this->errorResponse($errors, 422);
+    }
+
+    private function isFrontend($request)
+    {
+        return $request->acceptsHtml() && collect($request->route()->middleware())->contains('web');
     }
 }
