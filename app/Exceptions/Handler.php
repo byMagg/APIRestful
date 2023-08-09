@@ -35,8 +35,8 @@ class Handler extends ExceptionHandler
      */
     public function register(): void
     {
-        $this->reportable(function (Throwable $e, $request) {
-            return $this->convertExceptionToResponse($e, $request);
+        $this->reportable(function (Throwable $e) {
+            return $this->convertExceptionToResponse($e);
         });
     }
 
