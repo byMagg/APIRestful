@@ -37,11 +37,11 @@ class Handler extends ExceptionHandler
     public function register(): void
     {
         $this->renderable(function (Exception $e, $request = null) {
-            return $this->handleException($request, $e);
+            return $this->handleException($e, $request);
         });
     }
 
-    public function handleException($request, Exception $exception)
+    public function handleException(Exception $exception, $request)
     {
         if ($exception instanceof ValidationException) {
             return $this->convertValidationExceptionToResponse($exception, $request);
@@ -90,13 +90,6 @@ class Handler extends ExceptionHandler
         return $this->errorResponse('Falla inesperada. Intente luego', 500);
     }
 
-    /**
-     * Convert an authentication exception into an unauthenticated response.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \Illuminate\Auth\AuthenticationException  $exception
-     * @return \Illuminate\Http\Response
-     */
     protected function unauthenticated($request, AuthenticationException $exception)
     {
         if ($this->isFrontend($request)) {
@@ -105,13 +98,6 @@ class Handler extends ExceptionHandler
         return $this->errorResponse('No autenticado.', 401);
     }
 
-    /**
-     * Create a response object from the given validation exception.
-     *
-     * @param  \Illuminate\Validation\ValidationException  $e
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Symfony\Component\HttpFoundation\Response
-     */
     protected function convertValidationExceptionToResponse(ValidationException $e, $request)
     {
         $errors = $e->validator->errors()->getMessages();
