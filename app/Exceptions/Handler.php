@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Session\TokenMismatchException;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
@@ -35,8 +36,8 @@ class Handler extends ExceptionHandler
      */
     public function register(): void
     {
-        $this->reportable(function (Throwable $e) {
-            return $this->convertExceptionToResponse($e);
+        $this->renderable(function (Exception $e, $request = null) {
+            return $this->handleException($request, $e);
         });
     }
 
@@ -44,11 +45,6 @@ class Handler extends ExceptionHandler
     {
         if ($exception instanceof ValidationException) {
             return $this->convertValidationExceptionToResponse($exception, $request);
-        }
-
-        if ($exception instanceof ModelNotFoundException) {
-            $modelo = strtolower(class_basename($exception->getModel()));
-            return $this->errorResponse("No existe ninguna instancia de {$modelo} con el id especificado", 404);
         }
 
         if ($exception instanceof AuthenticationException) {
@@ -60,6 +56,10 @@ class Handler extends ExceptionHandler
         }
 
         if ($exception instanceof NotFoundHttpException) {
+            $previous = $exception->getPrevious();
+            if ($previous instanceof ModelNotFoundException) {
+                return $this->errorResponse("No existe ninguna instancia de {$previous->getModel()} con el id especificado", 404);
+            }
             return $this->errorResponse('No se encontró la URL especificada', 404);
         }
 
